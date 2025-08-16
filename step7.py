@@ -8,8 +8,10 @@ Created on Thu Aug 14 10:23:03 2025
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import pickle
+from datetime import timedelta
 from scipy.optimize import minimize
+import pickle
+
 
 ### STEP 6.0 Load Data
 
@@ -200,146 +202,19 @@ def min_std_benchmark_strategy(rolling_bootstrap_results, cost_rate=0.001):
     
     return strategy_results
 
-strategy_results_marko = min_std_benchmark_strategy(
+strategy_results = min_std_benchmark_strategy(
     rolling_bootstrap_results=rolling_results,
     cost_rate=0.001  # 0.1% transaction cost per buy/sell
 )
 
 
-# # ---------------------------
-# # Strategy 2: Maximize return subject to CVaR <= benchmark (w2)
-# # ---------------------------
-def rolling_cvar_max_return_strategy(
-    rolling_bootstrap_results, V0=1.0, alpha=0.99, cost_rate=0.001
-):
-    """
-    Rolling backtest for strategy: maximize return subject to CVaR <= benchmark,
-    including transaction costs.
-    """
-    strategy_results = []
-    w_prev = None  # initial portfolio (None or zeros)
-
-    for i, window in enumerate(rolling_bootstrap_results, 1):
-        
-        terminal_returns = window["terminal_returns"]
-        terminal_returns_bench = window["terminal_returns_bench"]
-        asset_list = window["asset_list"]
-        S, n_assets = terminal_returns.shape
-        p = np.ones(S) / S
-        
-        # print progress using actual dates
-        print(f"Window {i}/{len(rolling_bootstrap_results)}: "
-        f"{window['start_date'].date()} -> {window['end_date'].date()}")
-
-        # Precompute benchmark CVaR
-        bench_losses = V0 - (1.0 + terminal_returns_bench)
-        VaR_bench = np.quantile(bench_losses, alpha)
-        excess_bench = np.maximum(0, bench_losses - VaR_bench)
-        CVaR_bench = VaR_bench + np.sum(p * excess_bench) / (1 - alpha)
-
-        # Prepare matrices and initial guess
-        P_matrix = 1.0 + terminal_returns
-        x0 = np.concatenate([np.full(n_assets, V0/n_assets), [0.0], np.zeros(S)])
-        bounds = [(0, None)] * n_assets + [(None, None)] + [(0, None)] * S
-
-        # Define objective: maximize return minus transaction cost
-        def portfolio_ret_obj(xvars):
-            x = xvars[:n_assets]
-            port_mean = (terminal_returns @ x).mean()
-            tx_cost = 0.0
-            if w_prev is not None:
-                tx_cost = cost_rate * np.sum(np.abs(x - w_prev))
-            return -(port_mean - tx_cost)
-
-        # Constraints
-        def budget_constraint(xvars):
-            x = xvars[:n_assets]
-            return np.sum(x) - V0
-
-        def excess_constraints(xvars):
-            x = xvars[:n_assets]
-            VaR = xvars[n_assets]
-            excess = xvars[n_assets+1:]
-            losses = V0 - (P_matrix @ x)
-            return excess - (losses - VaR)
-
-        def cvar_constraint(xvars):
-            x = xvars[:n_assets]
-            VaR = xvars[n_assets]
-            excess = xvars[n_assets+1:]
-            CVaR_val = VaR + np.sum(p * excess) / (1 - alpha)
-            return CVaR_bench - CVaR_val
-
-        # Run optimizer
-        res = minimize(
-            portfolio_ret_obj,
-            x0,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=[
-                {'type': 'eq', 'fun': budget_constraint},
-                {'type': 'ineq', 'fun': excess_constraints},
-                {'type': 'ineq', 'fun': cvar_constraint}
-            ],
-            options={'maxiter': 1000, 'ftol': 1e-9}
-        )
-
-        if res.success:
-            x_opt = res.x[:n_assets]
-            VaR_opt = res.x[n_assets]
-            excess_opt = res.x[n_assets+1:]
-            CVaR_opt = VaR_opt + np.sum(p * excess_opt) / (1 - alpha)
-            exp_return = (terminal_returns @ x_opt).mean()
-            w_prev = x_opt  # update previous portfolio
-        else:
-            x_opt = None
-            CVaR_opt = None
-            exp_return = None
-
-        strategy_results.append({
-            "start_date": window["start_date"],
-            "end_date": window["end_date"],
-            "weights": pd.Series(x_opt, index=asset_list) if x_opt is not None else None,
-            "expected_return": exp_return,
-            "CVaR": CVaR_opt,
-            "success": res.success,
-            "message": res.message
-        })
-
-    return strategy_results
-
-
-strategy_results_cvar = rolling_cvar_max_return_strategy(
-    rolling_bootstrap_results=rolling_results,
-    V0=1.0,
-    alpha=0.99
-)
-
-# Check first few windows
-for res in strategy_results_cvar[:3]:
-    print(res["start_date"], res["end_date"], res["success"], res["message"])
-    #if res["success"]:
-    #    print(res["weights"].sort_values(ascending=False))
-
-
-import pickle
-
-# Save to pickle
-with open("strategy_results_cvar.pkl", "wb") as f:
-    pickle.dump(strategy_results_cvar, f)
-
-print("Saved strategy_results_cvar to strategy_results_cvar.pkl")
-
-
-
-#################### PLOTS
 
 assets = rolling_results[0]["asset_list"]
 
 # dates as index, assets as columns
 weights_df = pd.DataFrame([
     dict(date=sr["end_date"], **dict(zip(assets, sr["weights"])))
-    for sr in strategy_results_marko if sr["weights"] is not None
+    for sr in strategy_results if sr["weights"] is not None
 ])
 
 weights_df.set_index("date", inplace=True)
@@ -378,6 +253,8 @@ with open(r"strategy_results_cvar.pkl", "rb") as f:
 
 
 # Initialize
+port_returns = []
+port_returns2 = []
 portfolio_values = [100.0]
 portfolio_values2 = [100.0] 
 mean_values = [100.0]
@@ -393,7 +270,7 @@ agg_worst_values = [100.0]
 dates = []
 
 # Loop
-for roll, strat, strat_cvar in zip(rolling_results, strategy_results_marko, loaded_results_cvar):
+for roll, strat, strat_cvar in zip(rolling_results, strategy_results, loaded_results_cvar):
     if strat["weights"] is None or strat_cvar["weights"] is None:
         continue
 
@@ -415,11 +292,13 @@ for roll, strat, strat_cvar in zip(rolling_results, strategy_results_marko, load
 
     # Portfolio 1
     port_period_returns = (period_returns @ w)
+    port_returns.append(port_period_returns)
     growth_factor = (1.0 + port_period_returns).prod()
     new_value = portfolio_values[-1] * growth_factor
 
     # Portfolio 2 (CVaR)
     port_period_returns_cvar = (period_returns @ w_cvar)
+    port_returns2.append(port_period_returns_cvar)
     growth_factor_cvar = (1.0 + port_period_returns_cvar).prod()
     new_value_cvar = portfolio_values2[-1] * growth_factor_cvar
 
@@ -437,6 +316,7 @@ for roll, strat, strat_cvar in zip(rolling_results, strategy_results_marko, load
     worst_ret2 = float(np.min(scen_returns))
 
     # Append
+    
     dates.append(pd.to_datetime(roll["end_date"]))
     portfolio_values.append(new_value)
     portfolio_values2.append(new_value_cvar)
@@ -497,7 +377,7 @@ plt.show()
 # Benchmark plot also with Portfolio 2
 benchmark_isin = "DK0060259786"
 benchmark_values = [100.0]
-
+bench_returns = []
 for roll in rolling_results:
     start = pd.to_datetime(roll["end_date"]) + pd.Timedelta(days=1)
     end = start + pd.Timedelta(weeks=4) - pd.Timedelta(days=1)
@@ -507,6 +387,7 @@ for roll in rolling_results:
     else:
         growth_factor = (1.0 + bench_period).prod()
         benchmark_values.append(benchmark_values[-1] * growth_factor)
+        bench_returns.append(growth_factor)
 
 benchmark_series = pd.Series(benchmark_values, index=extended_dates)
 
@@ -521,12 +402,13 @@ plt.tight_layout()
 plt.show()
 
 
-mapping_df = pd.read_excel(r"NameISIN.xlsx") 
+mapping_df = pd.read_excel(r"NameISIN.xlsx")  
 isin_to_name = dict(zip(mapping_df["ISIN"], mapping_df["Name"]))
 
 # Rename columns in weights_df
 weights_named_df = weights_df.rename(columns=isin_to_name)
 
+# Now plot using the named columns
 assets = weights_named_df.columns
 dates = weights_named_df.index
 color_list = get_distinct_colors(len(assets))
@@ -600,5 +482,62 @@ markowitz = portfolio_stats(portfolio_series)
 cvar = portfolio_stats(portfolio_series2)
 bench = portfolio_stats(benchmark_series)
 
-print("markowitz", markowitz, "\n", "cvar", cvar, "\n", "bench", bench)
+# Now annualize
+def annualized_exp_return(returns, periods_per_year):
+    """Calculate annualized return from periodic returns"""
+    compounded_growth = (1 + returns).prod()
+    n_periods = returns.shape[0]
+    return compounded_growth**(periods_per_year / n_periods) - 1
 
+def annualized_return(returns):
+    """Calculate annualized return"""
+    annualized_ret = (1 + returns).resample('YE').prod() -1
+    return annualized_ret
+
+# VaR at 95%
+def value_at_risk(returns, alpha=0.05):
+    return returns.quantile(alpha)
+
+# Keep your existing functions:
+def calculate_cvar(returns, alpha=0.05):
+    if returns.empty:
+        return np.nan
+    var = returns.quantile(alpha)
+    return returns[returns <= var].mean()
+
+def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0225):
+    excess_returns = ann_returns - risk_free_rate
+    return excess_returns.mean() / ann_std
+
+periods_per_year = 13  
+
+summary_stats = {}
+portfolio_series_ret = portfolio_series.pct_change().iloc[1:]
+portfolio_series2_ret = portfolio_series2.pct_change().iloc[1:]
+benchmark_series_ret = benchmark_series.pct_change().iloc[1:]
+
+for name, ret_series in zip(
+    ['Min CVaR', 'Max Return w/ CVaR ≤ Benchmark', 'Benchmark'],
+    [portfolio_series_ret, portfolio_series2_ret, benchmark_series_ret]
+):
+    mean = ret_series.mean() * periods_per_year
+    std = ret_series.std() * np.sqrt(periods_per_year)
+    ann_exp_ret = annualized_exp_return(ret_series, periods_per_year)
+    ann_ret = annualized_return(ret_series)
+    sharpe = sharpe_ratio(ann_ret, std, risk_free_rate = 0.0225)
+    var95 = abs(value_at_risk(ann_ret, alpha=0.05))
+    cvar95 = abs(calculate_cvar(ann_ret, alpha=0.05))
+    
+    summary_stats[name] = {
+        'Mean Annualized (%)': ann_exp_ret*100,
+        'STD Annualized (%)': std*100,
+        'Sharpe Ratio': sharpe,
+        'VaR(95%) (%)': var95*100,
+        'CVaR(95%) (%)': cvar95*100
+    }
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_rows', None)
+summary_df = pd.DataFrame(summary_stats).T.round(2)
+print(summary_df)

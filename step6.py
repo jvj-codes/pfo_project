@@ -260,11 +260,16 @@ plt.show()
 ### CALCULATE PERFORMANCE OF THE STRAGIES
 
 # Annualized expected return
-def annualized_return(returns, periods_per_year):
+def annualized_exp_return(returns, periods_per_year):
     """Calculate annualized return from periodic returns"""
     compounded_growth = (1 + returns).prod()
     n_periods = returns.shape[0]
     return compounded_growth**(periods_per_year / n_periods) - 1
+
+def annualized_return(returns):
+    """Calculate annualized return"""
+    annualized_ret = (1 + returns).resample('YE').prod() -1
+    return annualized_ret
 
 # VaR at 95%
 def value_at_risk(returns, alpha=0.05):
@@ -277,9 +282,10 @@ def calculate_cvar(returns, alpha=0.05):
     var = returns.quantile(alpha)
     return returns[returns <= var].mean()
 
-def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0):
+def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0225):
     excess_returns = ann_returns - risk_free_rate
     return excess_returns.mean() / ann_std
+
 
 
 periods_per_year = 52  
@@ -292,13 +298,14 @@ for name, ret_series in zip(
 ):
     mean = ret_series.mean() * periods_per_year
     std = ret_series.std() * np.sqrt(periods_per_year)
-    ann_ret = annualized_return(ret_series, periods_per_year)
+    ann_exp_ret = annualized_exp_return(ret_series, periods_per_year)
+    ann_ret = annualized_return(ret_series)
     sharpe = sharpe_ratio(ann_ret, std, risk_free_rate = 0.0225)
-    var95 = abs(value_at_risk(ret_series, alpha=0.05))
-    cvar95 = abs(calculate_cvar(ret_series, alpha=0.05))
+    var95 = abs(value_at_risk(ann_ret, alpha=0.05))
+    cvar95 = abs(calculate_cvar(ann_ret, alpha=0.05))
     
     summary_stats[name] = {
-        'Mean Annualized (%)': ann_ret*100,
+        'Mean Annualized (%)': ann_exp_ret*100,
         'STD Annualized (%)': std*100,
         'Sharpe Ratio': sharpe,
         'VaR(95%) (%)': var95*100,

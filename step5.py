@@ -257,23 +257,32 @@ plt.show()
 
 ### CALCULATE PERFORMANCE OF THE STRAGIES
 
-def annualized_return(returns, periods_per_year):
+def annualized_exp_return(returns, periods_per_year):
+    """Calculate annualized return from periodic returns"""
     compounded_growth = (1 + returns).prod()
     n_periods = returns.shape[0]
     return compounded_growth**(periods_per_year / n_periods) - 1
 
+def annualized_return(returns):
+    """Calculate annualized return"""
+    annualized_ret = (1 + returns).resample('YE').prod() -1
+    return annualized_ret
+
+# VaR at 95%
 def value_at_risk(returns, alpha=0.05):
     return returns.quantile(alpha)
 
+# Keep your existing functions:
 def calculate_cvar(returns, alpha=0.05):
     if returns.empty:
         return np.nan
     var = returns.quantile(alpha)
     return returns[returns <= var].mean()
 
-def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0):
+def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0225):
     excess_returns = ann_returns - risk_free_rate
     return excess_returns.mean() / ann_std
+
 
 def regret_vector_for_returns(returns):
     V_term = 1 + returns
@@ -291,24 +300,26 @@ periods_per_year = 52
 summary_stats = {}
 
 for name, ret_series in zip(
-    ['Step 5.3', "Step 5.4", 'Benchmark'],
+    ['Min Downside Regret (5.3)', "Max Return (5.4)", 'Benchmark'],
     [port1_returns, port2_returns, bench_returns]
 ):
     mean = ret_series.mean() * periods_per_year
     std = ret_series.std() * np.sqrt(periods_per_year)
-    ann_ret = annualized_return(ret_series, periods_per_year)
+    ann_exp_ret = annualized_exp_return(ret_series, periods_per_year)
+    ann_ret = annualized_return(ret_series)
     sharpe = sharpe_ratio(ann_ret, std, risk_free_rate = 0.0225)
-    var95 = value_at_risk(ret_series, alpha=0.05)
-    cvar95 = calculate_cvar(ret_series, alpha=0.05)
+    var95 = abs(value_at_risk(ann_ret, alpha=0.05))
+    cvar95 = abs(calculate_cvar(ann_ret, alpha=0.05))
     exp_downside_regret = expected_regret(ret_series) * 100
     agg_downside_regret = agg_regret(ret_series)
     summary_stats[name] = {
-        'Mean Annualized (%)': ann_ret*100,
-        'STD Annualized (%)': std*100,
-        'Sharpe Ratio': sharpe,
-        'VaR(95%) (%)': var95*100,
-        'CVaR(95%) (%)': cvar95*100,
-        "Expected downside regret": exp_downside_regret
+        'Mean Ann.Ret(%)': ann_exp_ret*100,
+        'STD Ann.(%)': std*100,
+        'Sharpe': sharpe,
+        'VaR(95%)': var95*100,
+        'CVaR(95%)': cvar95*100,
+        "Exp. Downside Regret": exp_downside_regret#,
+        #"Agg. Downside Regret": agg_downside_regret * 100
     }
 
 pd.set_option('display.max_columns', None)
@@ -318,4 +329,4 @@ summary_df = pd.DataFrame(summary_stats).T.round(2)
 print(summary_df)
 
 
-print(benchmark_regret)
+#print(benchmark_regret)
