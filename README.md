@@ -60,7 +60,7 @@ with open("strategy_results_cvar.pkl", "rb") as f:
 This will provide you with precomputed, optimized results without rerunning the full simulation.
 
 ### Step 8: Conclusions and Recommendations
-- Summarized findings in a written report with supporting graphs and tables.  
+- Summarized findings in a written report with a supporting table.  
 - Presented investment recommendations tailored to the grandparents’ needs.  
 
 ---
