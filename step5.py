@@ -10,7 +10,7 @@ train_start = '2013-01-09'
 train_end   = '2019-01-09'
 # Load data
 
-file_path = r"C:\Users\niels\Desktop\Kandidat\AllReturns.xlsx"
+file_path = r"AllReturns.xlsx"
 jyske_ret = pd.read_excel(file_path, index_col=0)
 
 # Ensure index is datetime
