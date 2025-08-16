@@ -22,7 +22,7 @@ Course: https://kurser.ku.dk/course/nmak15000u
 
 ### Step 3: Feature Selection
 - Used Investment Funnel to reduce the investment universe to 30–50 ETFs/mutual funds.  
-- Reported fund details (Name, ISIN, TER, summary statistics, covariance matrix).  
+- Reported fund details (Name, ISIN, TER, summary statistics) (covariance matrix included in the code).  
 - Justified the chosen feature selection process.
 
 ### Step 4: First Optimization Model
