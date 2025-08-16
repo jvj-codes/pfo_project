@@ -10,7 +10,7 @@ train_start = '2013-01-09'
 train_end   = '2019-01-09'
 # Load data
 
-file_path = r"AllReturns.xlsx"
+file_path = r"C:\Users\niels\Desktop\Kandidat\AllReturns.xlsx"
 jyske_ret = pd.read_excel(file_path, index_col=0)
 
 # Ensure index is datetime
@@ -63,7 +63,7 @@ mu_ann_assets = mu_ann.drop(index=benchmark)
 cov_ann_assets = cov_ann.drop(index=benchmark, columns=benchmark)
 
 ## STEP 5.1 -------
-np.random.seed(1418)
+np.random.seed(1058)
 n_scenarios = 1000
 scenario_length = 4  
 
@@ -108,6 +108,7 @@ for j, isin in enumerate(asset_list):
     cum_ret = (1 + df_asset).prod(axis=1) - 1
     terminal_returns[:, j] = cum_ret.values
 
+
 # Benchmark værdier
 bootstrap_benchmark = bootstrap_df_full[bootstrap_df_full["ISIN"] == benchmark].copy()
 
@@ -123,17 +124,19 @@ p = np.ones(n_scenarios_per_asset) / n_scenarios_per_asset
 # HUSK: række = scenarie, kolonne = aktiv-scenarie-afslutsværdi
 
 # Parametre
-V0 = 1.0               # budget
-# mu = np.mean(cum_ret_bm) # Target mean average return er benchmark
+V0 = 1.0
 target_return = (1+0.02)**(4/52)
 g_vector = np.full(n_scenarios_per_asset, V0 * target_return)  # terminal target = 1.02
-barP = P0 * (1 + terminal_returns.mean(axis=0))  # forventet slutpris
-epsilon = 0.0 # forstår ikke pointen
+barP = P0 * np.mean(terminal_returns, axis=0) # forventet slutpris
+
+epsilon = 0
 
 # BP
 P0_benchmark = 1.0
 
-benchmark_barP_float = float(P0_benchmark * (1.0 + cum_ret_bm.mean()))
+benchmark_barP_float = cum_ret_bm.mean()
+
+
 print("benchmark_barP:", benchmark_barP_float)
 
 # Optimering
@@ -143,21 +146,21 @@ max_regret = 0
 def regret_vector_for_x(x):
     V_term = (1 + terminal_returns) @ x
     raw_regret = (g_vector - epsilon * V0) - V_term
-    return raw_regret  # downside only
+    return np.maximum(0, raw_regret)  # downside only
 
 def expected_regret(x):
-    return np.dot(p, regret_vector_for_x(x))  # regret_vector_for_x uses np.maximum(0, ...)
+    return np.dot(p, regret_vector_for_x(x)) 
+
+
 
 constraints_assets_vs_benchmark = [
     {'type': 'eq', 'fun': lambda x: np.dot(P0, x) - V0},                      # budget
-    {'type': 'ineq', 'fun': lambda x: np.dot(barP, x) - benchmark_barP_float}, # expected return >= benchmark
-    {'type': 'ineq', 'fun': lambda x: max_regret - regret_vector_for_x(x)}     # downside regret <= max_regret
+    {'type': 'ineq', 'fun': lambda x: np.dot(barP, x) - benchmark_barP_float} # expected return >= benchmark
 ]
 
 
 x0 = np.repeat(1.0 / n_assets, n_assets) 
 bounds = [(0, 1)] * n_assets
-
 
 res2 = minimize(expected_regret, x0, method='SLSQP', bounds=bounds, constraints=constraints_assets_vs_benchmark)
 w2 = res2.x
@@ -176,8 +179,7 @@ benchmark_regret = float(np.dot(p, benchmark_regret_vector))
 
 constraints = [
     {'type': 'eq', 'fun': lambda x: np.dot(P0, x) - V0},  # budget
-    {'type': 'ineq', 'fun': lambda x: benchmark_regret - expected_regret(x)},  # expected_regret <= benchmark_regret, risk shouldnt be higher than the benchmark
-    {'type': 'ineq', 'fun': lambda x: max_regret - regret_vector_for_x(x)}     # downside regret <= max_regret
+    {'type': 'ineq', 'fun': lambda x: benchmark_regret - expected_regret(x)}  # expected_regret <= benchmark_regret
 ]
 
 res3 = minimize(expected_return, x0, method='SLSQP', bounds=bounds, constraints=constraints,
@@ -190,9 +192,10 @@ print("Weights (nonzero):")
 print(pd.Series(w3, index=asset_list).loc[lambda s: s.abs() > 1e-6].sort_values(ascending=False))
 
 # Feasibility test
-feas_test = minimize(lambda x: 0, x0, bounds=bounds, constraints=constraints) 
+feas_test = minimize(lambda x: 0, x0, bounds=bounds, constraints=constraints)
+print("Feasibility test START ------------------ \n") 
 print(feas_test.success, feas_test.message)
-
+print("Feasibility test DONE ------------------ \n") 
 # Plotting
 perf_start = "2019-01-10"
 perf_end = "2025-12-31"
@@ -234,12 +237,10 @@ port1_returns = returns_perf.dot(x1_opt).fillna(0)
 port2_returns = returns_perf.dot(x2_opt).fillna(0)
 bench_returns = returns_perf_bm.squeeze().fillna(0)  # convert to Series
 
-
-cum_ret1 = ((1 + port1_returns).cumprod()) * 100 / ((1 + port1_returns).cumprod().iloc[0])
-cum_ret2 = ((1 + port2_returns).cumprod()) * 100 / ((1 + port2_returns).cumprod().iloc[0])
-cum_bench = ((1 + bench_returns).cumprod()) * 100 / ((1 + bench_returns).cumprod().iloc[0])
-
-
+cum_ret1 =  ((1 + port1_returns).cumprod()) * 100
+cum_ret2 = (1 + port2_returns).cumprod() * 100
+cum_bench = (1 + bench_returns).cumprod() * 100
+cum_bench[0] = 100
 
 plt.figure(figsize=(10,6))
 plt.plot(cum_ret1.index, cum_ret1, label="Step 5.3")
@@ -274,6 +275,16 @@ def sharpe_ratio(ann_returns, ann_std, risk_free_rate=0.0):
     excess_returns = ann_returns - risk_free_rate
     return excess_returns.mean() / ann_std
 
+def regret_vector_for_returns(returns):
+    V_term = 1 + returns
+    raw_regret = (1+0.02)**(4/52) - V_term # target = 0.02 & epsilon = 0
+    return np.maximum(0, raw_regret)  # downside only
+
+def expected_regret(returns):
+    return np.mean(regret_vector_for_returns(returns))  
+
+def agg_regret(returns):
+    return np.sum(regret_vector_for_returns(returns))  
 
 periods_per_year = 52  
 
@@ -281,7 +292,7 @@ summary_stats = {}
 
 for name, ret_series in zip(
     ['Step 5.3', "Step 5.4", 'Benchmark'],
-    [port2_returns, port3_returns, bench_returns]
+    [port1_returns, port2_returns, bench_returns]
 ):
     mean = ret_series.mean() * periods_per_year
     std = ret_series.std() * np.sqrt(periods_per_year)
@@ -289,13 +300,15 @@ for name, ret_series in zip(
     sharpe = sharpe_ratio(ann_ret, std, risk_free_rate = 0.0225)
     var95 = value_at_risk(ret_series, alpha=0.05)
     cvar95 = calculate_cvar(ret_series, alpha=0.05)
-    
+    exp_downside_regret = expected_regret(ret_series) * 100
+    agg_downside_regret = agg_regret(ret_series)
     summary_stats[name] = {
         'Mean Annualized (%)': ann_ret*100,
         'STD Annualized (%)': std*100,
         'Sharpe Ratio': sharpe,
         'VaR(95%) (%)': var95*100,
-        'CVaR(95%) (%)': cvar95*100
+        'CVaR(95%) (%)': cvar95*100,
+        "Expected downside regret": exp_downside_regret
     }
 
 pd.set_option('display.max_columns', None)
@@ -305,3 +318,4 @@ summary_df = pd.DataFrame(summary_stats).T.round(2)
 print(summary_df)
 
 
+print(benchmark_regret)
